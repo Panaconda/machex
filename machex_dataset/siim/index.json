@@ -1,0 +1,30 @@
+{
+    "000000": {
+        "path": "D:\\01 - Dokumente\\01 - Studium\\01 - StaDS Experience\\01 - Kursmaterial\\ADL - Applied Deep Learning\\applied_dl\\machex\\machex_dataset\\siim\\00\\000000.jpg",
+        "key": "./chestx-ray/SIIM_TRAIN_TEST\\dicom-images-train\\ID_0011fe81e.dcm"
+    },
+    "000001": {
+        "path": "D:\\01 - Dokumente\\01 - Studium\\01 - StaDS Experience\\01 - Kursmaterial\\ADL - Applied Deep Learning\\applied_dl\\machex\\machex_dataset\\siim\\00\\000001.jpg",
+        "key": "./chestx-ray/SIIM_TRAIN_TEST\\dicom-images-train\\ID_003206608.dcm"
+    },
+    "000002": {
+        "path": "D:\\01 - Dokumente\\01 - Studium\\01 - StaDS Experience\\01 - Kursmaterial\\ADL - Applied Deep Learning\\applied_dl\\machex\\machex_dataset\\siim\\00\\000002.jpg",
+        "key": "./chestx-ray/SIIM_TRAIN_TEST\\dicom-images-train\\ID_004d6fbb6.dcm"
+    },
+    "000003": {
+        "path": "D:\\01 - Dokumente\\01 - Studium\\01 - StaDS Experience\\01 - Kursmaterial\\ADL - Applied Deep Learning\\applied_dl\\machex\\machex_dataset\\siim\\00\\000003.jpg",
+        "key": "./chestx-ray/SIIM_TRAIN_TEST\\dicom-images-train\\ID_004d72c54.dcm"
+    },
+    "000004": {
+        "path": "D:\\01 - Dokumente\\01 - Studium\\01 - StaDS Experience\\01 - Kursmaterial\\ADL - Applied Deep Learning\\applied_dl\\machex\\machex_dataset\\siim\\00\\000004.jpg",
+        "key": "./chestx-ray/SIIM_TRAIN_TEST\\dicom-images-train\\ID_00528aa0e.dcm"
+    },
+    "000005": {
+        "path": "D:\\01 - Dokumente\\01 - Studium\\01 - StaDS Experience\\01 - Kursmaterial\\ADL - Applied Deep Learning\\applied_dl\\machex\\machex_dataset\\siim\\00\\000005.jpg",
+        "key": "./chestx-ray/SIIM_TRAIN_TEST\\dicom-images-train\\ID_00593ac6d.dcm"
+    },
+    "000006": {
+        "path": "D:\\01 - Dokumente\\01 - Studium\\01 - StaDS Experience\\01 - Kursmaterial\\ADL - Applied Deep Learning\\applied_dl\\machex\\machex_dataset\\siim\\00\\000006.jpg",
+        "key": "./chestx-ray/SIIM_TRAIN_TEST\\dicom-images-train\\ID_00b0e5a9f.dcm"
+    }
+}
