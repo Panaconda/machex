@@ -677,6 +677,7 @@ class MachexCompositor:
     def __init__(
         self,
         target_root: str,
+        vindrpcxr_root: Optional[str] = None,
         chexray14_root: Optional[str] = None,
         chexpert_root: Optional[str] = None,
         padchest_root: Optional[str] = None,
@@ -692,6 +693,7 @@ class MachexCompositor:
         frontal_only: bool = True,
     ) -> None:
         """Initialize MaCheX constructor."""
+        self.vindrpcxr_root = vindrpcxr_root
         self.chexray14_root = chexray14_root
         self.chexpert_root = chexpert_root
         self.padchest_root = padchest_root
@@ -715,6 +717,16 @@ class MachexCompositor:
             p = Chexray14Parser(
                 root=self.chexray14_root,
                 target_root=os.path.join(self.target_root, 'chex-ray14'),
+                transforms=self.transforms,
+                num_workers=self.num_workers,
+                frontal_only=self.frontal_only,
+            )
+            ps.append(p)
+
+        if self.vindrpcxr_root is not None:
+            p = VinDrCXRParser(
+                root=self.vindrpcxr_root,
+                target_root=os.path.join(self.target_root, 'vindrcxr'),
                 transforms=self.transforms,
                 num_workers=self.num_workers,
                 frontal_only=self.frontal_only,
@@ -857,6 +869,7 @@ if __name__ == '__main__':
 
     machex = MachexCompositor(
         target_root=cfg['MACHEX_PATH'],
+        vindrpcxr_root=cfg['VINDR_PCXR_ROOT'],
         chexray14_root=cfg['CHEXRAY14_ROOT'],
         chexpert_root=cfg['CHEXPERT_ROOT'],
         padchest_root=cfg['PADCHEST_ROOT'],

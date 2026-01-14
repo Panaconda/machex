@@ -1,3 +1,6 @@
 .idea
 commands
 .venv
+*.dicom
+*.pyc
+*.jpg

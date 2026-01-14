@@ -12,3 +12,4 @@ RSNA_ROOT: null
 OPENI_ROOT: null
 SIIM_ROOT: chestx-ray/SIIM_TRAIN_TEST
 OBJECTCXR_ROOT: null
+VINDR_PCXR_ROOT: chestx-ray/VinDr-PCXR
