@@ -72,9 +72,9 @@ class MaCheXDataset(Dataset):
         return self.ds[idx]
 
 
-if __name__ == '__main__':
-    machex = MaCheXDataset(MACHEX_PATH)
+# if __name__ == '__main__':
+#     machex = MaCheXDataset(MACHEX_PATH)
 
-    print(len(machex))
+#     print(len(machex))
 
-    print(machex[1337])
+#     print(machex[2])
