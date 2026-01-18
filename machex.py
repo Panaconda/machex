@@ -2,6 +2,7 @@
 from abc import ABC, abstractmethod
 import argparse
 import json
+from logging import root
 from math import isnan
 from multiprocessing import Pool
 import os
@@ -18,6 +19,9 @@ from pydicom import dcmread
 from torchvision.transforms import Resize, Compose, CenterCrop
 from tqdm import tqdm
 import yaml
+
+import time
+from deep_translator import DeeplTranslator
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -138,6 +142,124 @@ class BaseParser(ABC):
 
         save_as_json(index_dict, target=os.path.join(self.target_root, 'index.json'))
 
+
+# bimcv_covid19
+# --------------------------------------------------------------------------------------
+class BIMCVCOVID19Parser(BaseParser):
+    """Parser object for BIMCV-COVID19."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        """Initialize bimcv_covid19 parser."""
+        super().__init__(*args, **kwargs)
+
+        self.root = "chestx-ray/BIMCV-COVID19"
+        group_meta = ['bimcv_covid19_posi_subjects_1.tgz.tar-tvf.txt', 'bimcv_covid19_posi_subjects_2.tgz.tar-tvf.txt', 'bimcv_covid19_posi_subjects_3.tgz.tar-tvf.txt', 'bimcv_covid19_posi_subjects_4.tgz.tar-tvf.txt']
+        subject_root = [os.path.join(self.root, 'bimcv_covid19_posi_subjects_1'), os.path.join(self.root, 'bimcv_covid19_posi_subjects_2'), os.path.join(self.root, 'bimcv_covid19_posi_subjects_3'), os.path.join(self.root, 'bimcv_covid19_posi_subjects_4')]
+
+        ###
+        
+        dfs = []
+        my_cols = ['permissions', 'owner', 'size', 'date', 'time', 'path']
+
+        for i, group in enumerate(group_meta):
+            df = pd.read_csv(os.path.join(self.root, group), sep='\s+', names=my_cols, header=None)
+            df['subject_root'] = subject_root[i]
+            dfs.append(df)
+
+        full_df = pd.concat(dfs, ignore_index=True)
+
+        # Extract subject ID
+        full_df['subject'] = full_df['path'].str.extract(r'(sub-[^/]+)')
+
+        # Filter for scanner angle (AP/PA)
+        position_filter = 'vp-ap|vp-pa'
+        if not self.frontal_only:
+            position_filter += '|vp-lateral|vp-ll'
+
+        # Filter for image type (CR/DX)
+        image_filter = 'cr|dx'
+
+        mask = (
+            full_df['path'].str.contains(position_filter) &
+            full_df['path'].str.contains(image_filter) &
+            full_df['path'].str.endswith('.png')
+        )
+
+        full_df_image = full_df[mask].copy()
+
+        full_df_image['session'] = full_df_image['path'].str.extract(r'(ses-[^/]+)')   
+        full_df_image = full_df_image.drop_duplicates(subset=['subject'], keep='first')
+
+        full_df_image['keys'] = [os.path.join(subject_root, file_path) for subject_root, file_path in zip(full_df_image['subject_root'], full_df_image['path'])]
+        self._keys = full_df_image['keys'].tolist()
+
+        ### Report Dictionary
+
+        mask = (full_df['path'].str.endswith('_sessions.tsv'))
+        full_df_report = full_df[mask].copy()
+
+        full_df_report = full_df_report.merge(
+            full_df_image[['subject', 'keys', 'session']], 
+            on=['subject'], 
+            how='inner'
+        )
+
+        self.meta_dict = {}
+
+        for _, row in full_df_report.iterrows():
+
+            tsv_path = os.path.join(row['subject_root'], row['path'])
+            temp_tsv = pd.read_csv(tsv_path, sep='\t')
+            session_report = temp_tsv[temp_tsv['session_id'] == row['session']]
+            
+            report = str(session_report['medical_evaluation'].iloc[0])
+
+            report = report.strip("[]'\"")
+            report = report.replace('\\n', ' ').replace('\n', ' ')
+            report = re.sub(' +', ' ', report)
+            report = report.strip()
+
+            ### Translate the report from Spanish to English
+            api_key = 'dbb30d54-6ad2-49e0-b7e6-bcc53b43d4ba:fx'
+            report_translated = DeeplTranslator(api_key=api_key, source="es", target="en").translate(report)
+            time.sleep(0.5) # To avoid hitting rate limits
+
+            report_dict = {'report': report_translated}
+            self.meta_dict[row['keys']] = report_dict
+
+    @property
+    def keys(self) -> List[str]:
+        """Identifier for image files."""
+        return self._keys
+
+    @property
+    def name(self) -> str:
+        """Name of the dataset."""
+        return 'BIMCV-COVID19'
+
+    def _get_path(self, key: str) -> str:
+        """Return file path for a given key."""
+        return key
+
+    def _get_meta_data(self, key: str) -> Dict:
+        return self.meta_dict.get(key)    
+    
+    def _get_image(self, key: str) -> Image:
+        """Overwritten loader to extract images from .tgz and process 16-bit modes."""
+        img = Image.open(key)
+        
+        if img.mode not in ['RGB', 'L']:
+            arr = np.array(img).astype(np.float32)
+            img_min, img_max = arr.min(), arr.max()
+            if img_max > img_min:
+                arr = (arr - img_min) / (img_max - img_min)
+            img = Image.fromarray((arr * 255).astype(np.uint8))
+
+        img = img.convert('RGB')
+        if self.transforms is not None:
+            img = self.transforms(img)
+
+        return img
 
 # CHEX-RAY14
 # --------------------------------------------------------------------------------------
@@ -678,6 +800,8 @@ class MachexCompositor:
         self,
         target_root: str,
         vindrpcxr_root: Optional[str] = None,
+        bimcv_covid19_root: Optional[str] = None,
+
         chexray14_root: Optional[str] = None,
         chexpert_root: Optional[str] = None,
         padchest_root: Optional[str] = None,
@@ -694,6 +818,8 @@ class MachexCompositor:
     ) -> None:
         """Initialize MaCheX constructor."""
         self.vindrpcxr_root = vindrpcxr_root
+        self.bimcv_covid19_root = bimcv_covid19_root
+
         self.chexray14_root = chexray14_root
         self.chexpert_root = chexpert_root
         self.padchest_root = padchest_root
@@ -717,6 +843,16 @@ class MachexCompositor:
             p = Chexray14Parser(
                 root=self.chexray14_root,
                 target_root=os.path.join(self.target_root, 'chex-ray14'),
+                transforms=self.transforms,
+                num_workers=self.num_workers,
+                frontal_only=self.frontal_only,
+            )
+            ps.append(p)
+
+        if self.bimcv_covid19_root is not None:
+            p = BIMCVCOVID19Parser(
+                root=self.bimcv_covid19_root,
+                target_root=os.path.join(self.target_root, 'bimcv-covid19'),
                 transforms=self.transforms,
                 num_workers=self.num_workers,
                 frontal_only=self.frontal_only,
@@ -870,6 +1006,8 @@ if __name__ == '__main__':
     machex = MachexCompositor(
         target_root=cfg['MACHEX_PATH'],
         vindrpcxr_root=cfg['VINDR_PCXR_ROOT'],
+        bimcv_covid19_root=cfg['BIMCV_COVID19_ROOT'],
+
         chexray14_root=cfg['CHEXRAY14_ROOT'],
         chexpert_root=cfg['CHEXPERT_ROOT'],
         padchest_root=cfg['PADCHEST_ROOT'],

@@ -4,3 +4,5 @@ commands
 *.dicom
 *.pyc
 *.jpg
+chestx-ray/
+machex_dataset/

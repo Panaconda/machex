@@ -33,7 +33,7 @@ class ChestXrayDataset(Dataset):
     @staticmethod
     def _load_json(file_path: str) -> Dict:
         """Load a json file as dictionary."""
-        with open(file_path, 'r') as f:
+        with open(file_path, 'r', encoding='utf-8') as f:
             return json.load(f)
 
     def __len__(self):
@@ -47,7 +47,12 @@ class ChestXrayDataset(Dataset):
         img = Image.open(meta['path'])
         img = self.transforms(img)
 
-        return {'img': img}
+        out = {'img': img}
+
+        if 'report' in meta and meta['report']:
+            out['report'] = meta['report']
+            
+        return out
 
 
 class MaCheXDataset(Dataset):
