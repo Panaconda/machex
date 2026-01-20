@@ -21,7 +21,7 @@ from tqdm import tqdm
 import yaml
 
 import time
-from deep_translator import DeeplTranslator
+from deep_translator import DeeplTranslator, GoogleTranslator
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -148,16 +148,17 @@ class BaseParser(ABC):
 class BIMCVCOVID19Parser(BaseParser):
     """Parser object for BIMCV-COVID19."""
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, translator, files_selected, *args, **kwargs) -> None:
         """Initialize bimcv_covid19 parser."""
         super().__init__(*args, **kwargs)
 
-        self.root = "chestx-ray/BIMCV-COVID19"
-        group_meta = ['bimcv_covid19_posi_subjects_1.tgz.tar-tvf.txt', 'bimcv_covid19_posi_subjects_2.tgz.tar-tvf.txt', 'bimcv_covid19_posi_subjects_3.tgz.tar-tvf.txt', 'bimcv_covid19_posi_subjects_4.tgz.tar-tvf.txt']
-        subject_root = [os.path.join(self.root, 'bimcv_covid19_posi_subjects_1'), os.path.join(self.root, 'bimcv_covid19_posi_subjects_2'), os.path.join(self.root, 'bimcv_covid19_posi_subjects_3'), os.path.join(self.root, 'bimcv_covid19_posi_subjects_4')]
+        group_meta = []
+        subject_root = []
 
-        ###
-        
+        for i in files_selected:
+            group_meta.append(f'bimcv_covid19_posi_subjects_{i}.tgz.tar-tvf.txt')
+            subject_root.append(os.path.join(self.root, f'bimcv_covid19_posi_subjects_{i}'))
+
         dfs = []
         my_cols = ['permissions', 'owner', 'size', 'date', 'time', 'path']
 
@@ -220,10 +221,13 @@ class BIMCVCOVID19Parser(BaseParser):
             report = report.strip()
 
             ### Translate the report from Spanish to English
-            api_key = 'dbb30d54-6ad2-49e0-b7e6-bcc53b43d4ba:fx'
-            report_translated = DeeplTranslator(api_key=api_key, source="es", target="en").translate(report)
-            time.sleep(0.5) # To avoid hitting rate limits
-
+            if translator == 'deepl':
+                api_key = 'dbb30d54-6ad2-49e0-b7e6-bcc53b43d4ba:fx'
+                report_translated = DeeplTranslator(api_key=api_key, source="es", target="en").translate(report)
+                time.sleep(0.5) # To avoid hitting rate limits
+            else: 
+                report_translated = GoogleTranslator(source="es", target="en").translate(report)
+            
             report_dict = {'report': report_translated}
             self.meta_dict[row['keys']] = report_dict
 
@@ -246,15 +250,40 @@ class BIMCVCOVID19Parser(BaseParser):
     
     def _get_image(self, key: str) -> Image:
         """Overwritten loader to extract images from .tgz and process 16-bit modes."""
-        img = Image.open(key)
-        
-        if img.mode not in ['RGB', 'L']:
-            arr = np.array(img).astype(np.float32)
-            img_min, img_max = arr.min(), arr.max()
-            if img_max > img_min:
-                arr = (arr - img_min) / (img_max - img_min)
-            img = Image.fromarray((arr * 255).astype(np.uint8))
 
+        img = Image.open(key)
+        arr = np.array(img).astype(np.float32)
+
+        json_key = Path(key).with_suffix('.json')
+        if json_key.exists():
+
+            with open(json_key, 'r') as f:
+                metadata = json.load(f)
+
+            center = metadata.get("00281050", {}).get("Value", [None])[0]
+            width = metadata.get("00281051", {}).get("Value", [None])[0]
+            photo_interp = metadata.get("00280004", {}).get("Value", ["MONOCHROME2"])[0]
+
+            if center is None or width is None:
+                arr = (arr - arr.min()) / (arr.max() - arr.min() + 1e-8)
+
+                if photo_interp == "MONOCHROME1":
+                    arr = 1.0 - arr  # This flips the colors so Bones = White
+
+            else:                 
+                low = center - width / 2
+                high = center + width / 2
+                
+                arr = np.clip(arr, low, high)
+                arr = (arr - low) / (high - low)
+
+                if photo_interp == "MONOCHROME1":
+                    arr = 1.0 - arr  # This flips the colors so Bones = White
+
+        else:
+            arr = (arr - arr.min()) / (arr.max() - arr.min() + 1e-8)
+
+        img = Image.fromarray((arr * 255).astype(np.uint8))
         img = img.convert('RGB')
         if self.transforms is not None:
             img = self.transforms(img)
@@ -856,6 +885,8 @@ class MachexCompositor:
                 transforms=self.transforms,
                 num_workers=self.num_workers,
                 frontal_only=self.frontal_only,
+                translator='google',
+                files_selected=[1] #[1,2,3,4]
             )
             ps.append(p)
 
@@ -1020,6 +1051,6 @@ if __name__ == '__main__':
         objcxr_root=cfg['OBJECTCXR_ROOT'],
         transforms=TRANSFORMS,
         num_workers=cfg['NUM_WORKERS'],
-        frontal_only=cfg['FRONTAL_ONLY']
+        frontal_only=cfg['FRONTAL_ONLY'],
     )
     machex.run()
