@@ -143,6 +143,90 @@ class BaseParser(ABC):
         save_as_json(index_dict, target=os.path.join(self.target_root, 'index.json'))
 
 
+# VinDr-PCXR - Pediatric Chest X-Ray
+# --------------------------------------------------------------------------------------
+class VinDrPCXRParser(BaseParser):
+    """Parser object for VinDr-PCXR."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        """Initialize VinDr-CXR parser."""
+        super().__init__(*args, **kwargs)
+        
+        self.img_dir = os.path.join(self.root, 'train' if self.is_train else 'test')
+        files = os.listdir(self.img_dir)
+
+        data_list = []
+
+        for file in files:
+            ds = dcmread(os.path.join(self.img_dir, file))
+            
+            age = ds.PatientAge if 'PatientAge' in ds else np.nan
+            sex = ds.PatientSex if 'PatientSex' in ds else np.nan
+            
+            data_list.append({
+                'PatientAge': age, 
+                'PatientSex': sex,
+                'image_id': file
+            })
+
+        df = pd.DataFrame(data_list)
+
+        df['PatientAge'] = df['PatientAge'].apply(lambda x: x if str(x).endswith('Y') else np.nan)
+        df['Age_Numeric'] = pd.to_numeric(df['PatientAge'].str[:3], errors='coerce').astype('Int8')
+        df = df[df['Age_Numeric'] <=18]
+        df = df[df['Age_Numeric'] >=3]
+
+        self._keys = df['image_id'].tolist()
+
+        # Metadata
+
+        df['report_text'] = "The patient is a " + \
+                            df['PatientSex'].replace({'M': 'male', 'F': 'female'}) + \
+                            " child aged " + df['Age_Numeric'].astype(str) + " with no findings."
+
+        self.meta_dict = {
+            row['image_id']: {'report': row['report_text']} 
+            for _, row in df.iterrows()
+        }
+
+    @property
+    def keys(self) -> List[str]:
+        """Identifier for image files."""
+        return self._keys
+
+    @property
+    def name(self) -> str:
+        """Name of the dataset."""
+        return 'VinDr-PCXR'
+
+    def _get_path(self, key: str) -> str:
+        """Return file path for a given key."""
+        return os.path.join(self.root, 'train' if self.is_train else 'test', key)
+
+    def _get_meta_data(self, key: str) -> Dict:
+        """Obtain meta data for a given key."""
+        return self.meta_dict.get(key)  
+
+    def _get_image(self, key: str) -> Image:
+        """Load and process an image for a given key."""
+        # Get image method needs to be overridden here, as ground truth is DICOM.
+        ds = dcmread(os.path.join(self.img_dir, key))
+
+        # Fix wrong metadata to prevent warning
+        ds.BitsStored = 16
+
+        arr = ds.pixel_array
+        arr = (arr - np.min(arr)) / (np.max(arr) - np.min(arr))
+
+        # Some images have a different mode
+        if ds.PhotometricInterpretation == 'MONOCHROME1':
+            arr = 1.0 - arr
+
+        img = Image.fromarray(np.uint8(arr * 255))
+        img = img.convert('RGB')
+        img = TRANSFORMS(img)
+        return img
+
 # bimcv_covid19
 # --------------------------------------------------------------------------------------
 class BIMCVCOVID19Parser(BaseParser):
@@ -891,9 +975,9 @@ class MachexCompositor:
             ps.append(p)
 
         if self.vindrpcxr_root is not None:
-            p = VinDrCXRParser(
+            p = VinDrPCXRParser(
                 root=self.vindrpcxr_root,
-                target_root=os.path.join(self.target_root, 'vindrcxr'),
+                target_root=os.path.join(self.target_root, 'vindr-pcxr'),
                 transforms=self.transforms,
                 num_workers=self.num_workers,
                 frontal_only=self.frontal_only,
