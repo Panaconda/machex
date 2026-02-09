@@ -6,3 +6,4 @@ commands
 *.jpg
 chestx-ray/
 machex_dataset/
+*pt
