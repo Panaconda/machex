@@ -7,3 +7,5 @@ commands
 chestx-ray/
 machex_dataset/
 *pt
+machex_pediatric_dataset/vindr-pcxr/index.json
+*.yml

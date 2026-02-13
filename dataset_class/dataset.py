@@ -8,6 +8,7 @@ from typing import (
 )
 
 from PIL import Image
+import torch
 from torch.utils.data import Dataset, ConcatDataset
 from torchvision.transforms import Compose, ToTensor
 
@@ -48,6 +49,10 @@ class ChestXrayDataset(Dataset):
         img = self.transforms(img)
 
         out = {'img': img}
+
+        if 'label_vec' in meta and meta['label_vec']:
+            label_tensor = torch.tensor(meta['label_vec'], dtype=torch.float32)
+            out['label_tensor'] = label_tensor
 
         if 'report' in meta and meta['report']:
             out['report'] = meta['report']
