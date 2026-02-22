@@ -1,4 +1,4 @@
-MACHEX_PATH: machex_dataset
+MACHEX_PATH: ../machex_dataset/vindrcxr
 NUM_WORKERS: 1
 FRONTAL_ONLY: True
 
@@ -10,7 +10,7 @@ VINDRCXR_ROOT: null
 BRAX_ROOT: null
 RSNA_ROOT: null
 OPENI_ROOT: null
-SIIM_ROOT: chestx-ray/SIIM_TRAIN_TEST
+SIIM_ROOT: null
 OBJECTCXR_ROOT: null
 VINDR_PCXR_ROOT: chestx-ray/VinDr-PCXR
-BIMCV_COVID19_ROOT: chestx-ray/BIMCV-COVID19
+BIMCV_COVID19_ROOT: null

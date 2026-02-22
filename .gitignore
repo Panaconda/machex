@@ -9,3 +9,4 @@ machex_dataset/
 *pt
 machex_pediatric_dataset/vindr-pcxr/index.json
 *.yml
+.machex/*

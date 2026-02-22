@@ -153,7 +153,8 @@ class VinDrPCXRParser(BaseParser):
         super().__init__(*args, **kwargs)
         
         self.img_dir = os.path.join(self.root, 'train' if self.is_train else 'test')
-        files = os.listdir(self.img_dir)
+        # [EDIT] filter to .dicom only
+        files = [f for f in os.listdir(self.img_dir) if f.endswith('.dicom')]
 
         #load csv
         annots_df = pd.read_csv(os.path.join(self.img_dir, 'annotations_train.csv' if self.is_train else 'annotations_test.csv'))
@@ -164,10 +165,10 @@ class VinDrPCXRParser(BaseParser):
         for file in files:
 
             img_id = file.split('.')[0]
-            ds = dcmread(os.path.join(self.img_dir, file), force=True)    
-            
-            age = ds.PatientAge if 'PatientAge' in ds else np.nan
-            sex = ds.PatientSex if 'PatientSex' in ds else np.nan
+            # [EDIT] removed dcmread for age/sex — not needed for simplified template
+            # ds = dcmread(os.path.join(self.img_dir, file), force=True)    
+            # age = ds.PatientAge if 'PatientAge' in ds else np.nan
+            # sex = ds.PatientSex if 'PatientSex' in ds else np.nan
             
             findings = annots_df[annots_df['image_id'] == img_id]['class_name'].unique()
             annotation = ", ".join(findings) if len(findings) > 0 else None
@@ -183,59 +184,50 @@ class VinDrPCXRParser(BaseParser):
                 continue
 
             data_list.append({
-                    'PatientAge': age, 
-                    'PatientSex': sex,
+                    # 'PatientAge': age, 
+                    # 'PatientSex': sex,
                     'image_id': file,
                     'annotation': annotation,
                     'label_vec': label_vec,
                     'label_pathologies': label_str
                 })
 
-            df = pd.DataFrame(data_list)
-            
-            df['PatientAge'] = df['PatientAge'].apply(lambda x: x if str(x).endswith('Y') else np.nan)
-            df['Age_Numeric'] = pd.to_numeric(
-            df['PatientAge'].astype(str).str[:3], errors='coerce').astype('Int8')
-            df = df[df['Age_Numeric'] <=18]
+        # [EDIT] everything below was INSIDE the for-loop — moved outside
+        df = pd.DataFrame(data_list)
 
-            self._keys = df['image_id'].tolist()
+        df['PatientAge'] = df['PatientAge'].apply(lambda x: x if str(x).endswith('Y') else np.nan)
+        df['Age_Numeric'] = pd.to_numeric(
+        df['PatientAge'].astype(str).str[:3], errors='coerce').astype('Int8')
+        df = df[df['Age_Numeric'] <=18]
 
-            # Metadata
+        self._keys = df['image_id'].tolist()
 
-            relevant_rows = annots_df[annots_df['image_id'] == img_id]['class_name']
-            unique_findings = relevant_rows.unique()
-            annotation = ", ".join(unique_findings)
+        # [EDIT] removed redundant per-iteration annotation re-query
+        # relevant_rows = annots_df[annots_df['image_id'] == img_id]['class_name']
+        # unique_findings = relevant_rows.unique()
+        # annotation = ", ".join(unique_findings)
 
-            # Report Generation
+        # [EDIT] removed age/sex from prefix
+        prefix = "Findings: Frontal radiograph of a child."
 
-            sex_str = df['PatientSex'].map({'M': 'male ', 'F': 'female '}).fillna('')
-            full_age_str = ", aged " + df['Age_Numeric'].astype(str) + " years"
-            age_str = np.where(df['Age_Numeric'].notna(), full_age_str, "")
+        has_findings = (df['annotation'].notna()) & (df['annotation'] != "No finding")
 
-            prefix = (
-                "Findings: Frontal radiograph of a " + 
-                sex_str + "child" + 
-                age_str + "."
-            )
+        findings_abnormal = " Evaluation reveals " + df['annotation'] + "."
+        findings_normal = " No acute radiographic abnormalities are observed."
 
-            has_findings = (df['annotation'].notna()) & (df['annotation'] != "No finding")
+        middle_text = np.where(has_findings, findings_abnormal, findings_normal)
 
-            findings_abnormal = " Evaluation reveals " + df['annotation'] + "."
-            findings_normal = " No acute radiographic abnormalities are observed."
+        suffix = " Impressions: " + df['label_pathologies'] + "."
 
-            middle_text = np.where(has_findings, findings_abnormal, findings_normal)
+        df['report_text'] = prefix + middle_text + suffix
 
-            suffix = " Impressions: " + df['label_pathologies'] + "."
-
-            df['report_text'] = prefix + middle_text + suffix
-
-            self.meta_dict = {
-                row['image_id']: {
-                    'report': row['report_text'],
-                    'label_vec': row['label_vec'].tolist() 
-                } 
-                for _, row in df.iterrows() 
-            }
+        self.meta_dict = {
+            row['image_id']: {
+                'report': row['report_text'],
+                'label_vec': row['label_vec'].tolist() 
+            } 
+            for _, row in df.iterrows() 
+        }
 
     @property
     def keys(self) -> List[str]:
