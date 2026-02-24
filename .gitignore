@@ -9,3 +9,17 @@ machex_dataset/
 *pt
 machex_pediatric_dataset/vindr-pcxr/index.json
 *.yml
+machex_pediatric_classifier/vindr-pcxr/test/index.json
+machex_pediatric_classifier/vindr-pcxr/train/index.json
+machex_pediatric_classifier/vindr-pcxr/val/index.json
+machex_pediatric_classifier_5/vindr-pcxr/test/index.json
+machex_pediatric_classifier_5/vindr-pcxr/train/index.json
+machex_pediatric_classifier_5/vindr-pcxr/val/index.json
+machex_pediatric_classifier_6/vindr-pcxr/test/index.json
+machex_pediatric_classifier_6/vindr-pcxr/train/index.json
+machex_pediatric_classifier_6/vindr-pcxr/val/index.json
+machex_pediatric_diffusion/vindr-pcxr/test/index.json
+machex_pediatric_diffusion/vindr-pcxr/train/index.json
+machex_pediatric_diffusion/vindr-pcxr/val/index.json
+torchxray_dataset_pediatric/test/labels.csv
+torchxray_dataset_pediatric/train/labels.csv

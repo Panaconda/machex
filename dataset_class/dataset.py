@@ -18,9 +18,13 @@ MACHEX_PATH: Final = 'machex_dataset'
 class ChestXrayDataset(Dataset):
     """Class for handling datasets in the MaCheX composition."""
 
-    def __init__(self, root: str, transforms: Optional[Compose] = None) -> None:
+    def __init__(self, split, root: str, transforms: Optional[Compose] = None) -> None:
         """Initialize ChestXrayDataset."""
-        self.root = root
+
+        if split not in ['train', 'val', 'test']:
+            raise ValueError(f"Invalid split: {split}. Must be one of 'train', 'val', 'test'.")
+
+        self.root = os.path.join(root, split)
         json_path = os.path.join(self.root, 'index.json')
         self.index_dict = ChestXrayDataset._load_json(json_path)
 
@@ -63,12 +67,12 @@ class ChestXrayDataset(Dataset):
 class MaCheXDataset(Dataset):
     """Massive chest X-ray dataset."""
 
-    def __init__(self, root: str, transforms: Optional[Compose] = None) -> None:
+    def __init__(self, root: str, split: str, transforms: Optional[Compose] = None) -> None:
         """Initialize MaCheXDataset"""
-        self.root = root
+        self.root = os.path.join(root)
         sub_dataset_roots = os.listdir(self.root)
         datasets = [
-            ChestXrayDataset(root=os.path.join(root, r), transforms=transforms)
+            ChestXrayDataset(root=os.path.join(root, r), split=split, transforms=transforms)
             for r in sub_dataset_roots
         ]
         self.ds = ConcatDataset(datasets)

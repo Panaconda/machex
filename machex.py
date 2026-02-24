@@ -16,7 +16,7 @@ import pandas as pd
 from PIL import Image, ImageMath
 from PIL import ImageFile
 from pydicom import dcmread
-from torchvision.transforms import Resize, Compose, CenterCrop
+from torchvision.transforms import Resize, Compose, CenterCrop, InterpolationMode
 from tqdm import tqdm
 import yaml
 
@@ -49,7 +49,7 @@ class BaseParser(ABC):
         self,
         root: str,
         target_root: str,
-        train: bool = True,
+        split: str = "train",
         transforms: Optional[Compose] = None,
         num_workers: int = 16,
         frontal_only: bool = True,
@@ -59,7 +59,9 @@ class BaseParser(ABC):
         """Initialize base parser."""
         self.root = root
         self.target_root = target_root
-        self.is_train = train
+        if split not in ['train', 'test', 'val']:
+            raise ValueError(f"Invalid split: {split}. Must be one of 'train', 'test', 'val'.")
+        self.split = split
         self.transforms = transforms
         self.num_workers = num_workers
         self.frontal_only = frontal_only
@@ -112,7 +114,7 @@ class BaseParser(ABC):
         file_dir = file_id[:2]
         file_path = os.path.join(self.target_root, file_dir, file_id + '.jpg')
 
-        img = self._get_image(key)
+        img = self._get_image(key)        
         img.save(file_path, quality=95)
 
         meta_dict = {'path': os.path.abspath(file_path), 'key': key}
@@ -148,94 +150,43 @@ class BaseParser(ABC):
 class VinDrPCXRParser(BaseParser):
     """Parser object for VinDr-PCXR."""
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, split, for_classifier, pathologies=None, *args, **kwargs) -> None:
         """Initialize VinDr-CXR parser."""
-        super().__init__(*args, **kwargs)
-        
-        self.img_dir = os.path.join(self.root, 'train' if self.is_train else 'test')
-        files = os.listdir(self.img_dir)
+
+        self.for_classifier = for_classifier
+        self.pathologies = pathologies
+
+        if self.for_classifier:
+            out_resolution = 224
+        else:
+            out_resolution = 1024
+
+        transforms = Compose([
+            Resize(out_resolution, interpolation=InterpolationMode.BICUBIC),
+            CenterCrop(out_resolution)
+        ])
+
+        kwargs['transforms'] = transforms
+        super().__init__(split=split, *args, **kwargs)
+                
+        self.split = split
+        self.img_dir = os.path.join(self.root, 'test' if self.split == 'test' else 'train')
+        self.target_root = os.path.join(self.target_root, self.split)
 
         #load csv
-        annots_df = pd.read_csv(os.path.join(self.img_dir, 'annotations_train.csv' if self.is_train else 'annotations_test.csv'))
-        labels_df = pd.read_csv(os.path.join(self.img_dir, 'image_labels_train.csv' if self.is_train else 'image_labels_test.csv'))
+        self.annots_df = pd.read_csv(os.path.join(self.img_dir, 'annotations_test.csv' if split == 'test' else 'annotations_train.csv'))
+        self.labels_df = pd.read_csv(os.path.join(self.img_dir, 'image_labels_test.csv' if split == 'test' else 'image_labels_train.csv'))
 
-        data_list = []
+        self.labels_df = self._filter_main_pathologies(self.labels_df)
+        
+        local_files = [f for f in os.listdir(self.img_dir) if f.endswith('.dicom')]
+        split_files = self._apply_validation_split(local_files)
 
-        for file in files:
+        df = self._build_metadata_dataframe(split_files)
+        df = self._generate_reports(df)
 
-            img_id = file.split('.')[0]
-            ds = dcmread(os.path.join(self.img_dir, file), force=True)    
-            
-            age = ds.PatientAge if 'PatientAge' in ds else np.nan
-            sex = ds.PatientSex if 'PatientSex' in ds else np.nan
-            
-            findings = annots_df[annots_df['image_id'] == img_id]['class_name'].unique()
-            annotation = ", ".join(findings) if len(findings) > 0 else None
-            
-            subject_labels = labels_df[labels_df['image_id'] == img_id]
-
-            if not subject_labels.empty:
-                label_vec = subject_labels.iloc[0, 2:].values.astype(int) 
-                active_pathologies = subject_labels.columns[2:][subject_labels.iloc[0, 2:] == 1].tolist()
-                label_str = ", ".join(active_pathologies) if active_pathologies else "no finding"
-            else:
-                print(f"Warning: No label found for image_id {img_id}. Skipping.")
-                continue
-
-            data_list.append({
-                    'PatientAge': age, 
-                    'PatientSex': sex,
-                    'image_id': file,
-                    'annotation': annotation,
-                    'label_vec': label_vec,
-                    'label_pathologies': label_str
-                })
-
-            df = pd.DataFrame(data_list)
-            
-            df['PatientAge'] = df['PatientAge'].apply(lambda x: x if str(x).endswith('Y') else np.nan)
-            df['Age_Numeric'] = pd.to_numeric(
-            df['PatientAge'].astype(str).str[:3], errors='coerce').astype('Int8')
-            df = df[df['Age_Numeric'] <=18]
-
-            self._keys = df['image_id'].tolist()
-
-            # Metadata
-
-            relevant_rows = annots_df[annots_df['image_id'] == img_id]['class_name']
-            unique_findings = relevant_rows.unique()
-            annotation = ", ".join(unique_findings)
-
-            # Report Generation
-
-            sex_str = df['PatientSex'].map({'M': 'male ', 'F': 'female '}).fillna('')
-            full_age_str = ", aged " + df['Age_Numeric'].astype(str) + " years"
-            age_str = np.where(df['Age_Numeric'].notna(), full_age_str, "")
-
-            prefix = (
-                "Findings: Frontal radiograph of a " + 
-                sex_str + "child" + 
-                age_str + "."
-            )
-
-            has_findings = (df['annotation'].notna()) & (df['annotation'] != "No finding")
-
-            findings_abnormal = " Evaluation reveals " + df['annotation'] + "."
-            findings_normal = " No acute radiographic abnormalities are observed."
-
-            middle_text = np.where(has_findings, findings_abnormal, findings_normal)
-
-            suffix = " Impressions: " + df['label_pathologies'] + "."
-
-            df['report_text'] = prefix + middle_text + suffix
-
-            self.meta_dict = {
-                row['image_id']: {
-                    'report': row['report_text'],
-                    'label_vec': row['label_vec'].tolist() 
-                } 
-                for _, row in df.iterrows() 
-            }
+        self._keys = df['image_id'].tolist()
+        self.meta_dict = self._build_meta_dict(df)
 
     @property
     def keys(self) -> List[str]:
@@ -249,7 +200,7 @@ class VinDrPCXRParser(BaseParser):
 
     def _get_path(self, key: str) -> str:
         """Return file path for a given key."""
-        return os.path.join(self.root, 'train' if self.is_train else 'test', key)
+        return os.path.join(self.root, self.split, key)
 
     def _get_meta_data(self, key: str) -> Dict:
         """Obtain meta data for a given key."""
@@ -258,7 +209,7 @@ class VinDrPCXRParser(BaseParser):
     def _get_image(self, key: str) -> Image:
         """Load and process an image for a given key."""
         # Get image method needs to be overridden here, as ground truth is DICOM.
-        ds = dcmread(os.path.join(self.img_dir, key))
+        ds = dcmread(os.path.join(self.img_dir, key + '.dicom'))
 
         # Fix wrong metadata to prevent warning
         ds.BitsStored = 16
@@ -267,6 +218,7 @@ class VinDrPCXRParser(BaseParser):
             arr = ds.pixel_array
         except ValueError as e:
             print(f"\n[ERROR] Skipping {key}: {e}")
+            return None
         
         arr = (arr - np.min(arr)) / (np.max(arr) - np.min(arr))
 
@@ -275,9 +227,142 @@ class VinDrPCXRParser(BaseParser):
             arr = 1.0 - arr
 
         img = Image.fromarray(np.uint8(arr * 255))
-        img = img.convert('RGB')
-        img = TRANSFORMS(img)
+
+        if self.for_classifier:
+            img = img.convert('L')  # Convert to grayscale for classifier
+        else:
+            img = img.convert('RGB')
+
+        if self.transforms is not None:
+            img = self.transforms(img)
         return img
+
+    @staticmethod
+    def _get_val_ids(
+            labels_df,
+            val_dict = {
+                'No finding' : 100,
+                'Bronchitis' : 50,
+                'Bronchiolitis': 50,
+                'Pneumonia': 50
+                },
+                random_state=42):
+        
+        val_image_ids = set()
+        
+        for pathology, freq in val_dict.items():
+
+            positive_cases = labels_df[labels_df[pathology] == 1.0]
+            n_samples = min(freq, len(positive_cases))
+                
+            if n_samples > 0:
+                sampled_df = positive_cases.sample(n=n_samples, random_state=random_state)
+                dicom_ids = (sampled_df['image_id'] + '.dicom').tolist()
+                val_image_ids.update(dicom_ids)
+
+        return list(val_image_ids)
+
+    def _apply_validation_split(self, files: List[str]) -> List[str]:
+
+        if self.split not in ['val', 'train']:
+            return files
+
+        val_ids = self._get_val_ids(self.labels_df)
+        
+        if self.split == 'val':
+            return val_ids
+        else: # train
+            return [file for file in files if file not in val_ids]
+        
+    def _build_metadata_dataframe(self, files_parse: List[str]) -> pd.DataFrame:
+        data_list = []
+
+        for file in files_parse:
+            img_id = os.path.splitext(file)[0]
+            try: 
+                ds = dcmread(os.path.join(self.img_dir, file), force=True)    
+            except Exception as e: 
+                print(f"Warning: Skipping {file} - Could not read DICOM (might be downloading).")
+                continue
+            
+            age = ds.PatientAge if 'PatientAge' in ds else np.nan
+            sex = ds.PatientSex if 'PatientSex' in ds else np.nan
+            
+            # Process Annotations
+            subject_annots = self.annots_df[self.annots_df['image_id'] == img_id]
+            findings = subject_annots['class_name'].unique()
+            annotation = ", ".join(findings) if len(findings) > 0 else None
+            
+            # Process Labels
+            subject_labels = self.labels_df[self.labels_df['image_id'] == img_id]
+            if not subject_labels.empty:
+                label_vec = subject_labels.iloc[0, 2:].values.astype(int) 
+                active_pathologies = subject_labels.columns[2:][subject_labels.iloc[0, 2:] == 1].tolist()
+                label_str = ", ".join(active_pathologies) if active_pathologies else "no finding"
+            else:
+                print(f"Warning: No label found for image_id {img_id}. Skipping.")
+                continue
+
+            data_list.append({
+                'PatientAge': age, 
+                'PatientSex': sex,
+                'image_id': img_id,
+                'file_name': img_id + '.dicom',
+                'annotation': annotation,
+                'label_vec': label_vec,
+                'label_pathologies': label_str
+            })
+
+        df = pd.DataFrame(data_list)
+        
+        # Clean Age and Filter for Pediatrics (<= 18)
+        df['PatientAge'] = df['PatientAge'].apply(lambda x: x if str(x).endswith('Y') else np.nan)
+        df['Age_Numeric'] = pd.to_numeric(df['PatientAge'].astype(str).str[:3], errors='coerce').astype('Int8')
+        df = df[df['Age_Numeric'] <= 18].copy()
+        
+        return df 
+    
+    def _generate_reports(self, df: pd.DataFrame) -> pd.DataFrame:
+
+        sex_str = df['PatientSex'].map({'M': 'male ', 'F': 'female '}).fillna('')
+        full_age_str = ", aged " + df['Age_Numeric'].astype(str) + " years"
+        age_str = np.where(df['Age_Numeric'].notna(), full_age_str, "")
+
+        prefix = "Findings: Frontal radiograph of a " + sex_str + "child" + age_str + "."
+
+        has_findings = (df['annotation'].notna()) & (df['annotation'] != "No finding")
+        findings_abnormal = " Evaluation reveals " + df['annotation'].astype(str) + "."
+        findings_normal = " No acute radiographic abnormalities are observed."
+        middle_text = np.where(has_findings, findings_abnormal, findings_normal)
+
+        suffix = " Impressions: " + df['label_pathologies'].astype(str) + "."
+
+        df['report_text'] = prefix + middle_text + suffix
+        return df
+    
+    def _build_meta_dict(self, df: pd.DataFrame) -> Dict:
+
+        return {
+            row['image_id']: {
+                'report': row['report_text'],
+                'label_vec': row['label_vec'].tolist() 
+            } 
+            for _, row in df.iterrows() 
+        }
+    
+    def _filter_main_pathologies(self, df: pd.DataFrame) -> pd.DataFrame:
+
+        if self.pathologies is None:
+            return df
+        
+        columns_to_keep = ['image_id', 'rad_ID'] + self.pathologies
+        df = df[columns_to_keep]
+
+        mask = (df[self.pathologies] == 1.0).any(axis=1)
+        df = df[mask]
+
+        return df
+
 
 # bimcv_covid19
 # --------------------------------------------------------------------------------------
@@ -1033,6 +1118,34 @@ class MachexCompositor:
                 transforms=self.transforms,
                 num_workers=self.num_workers,
                 frontal_only=self.frontal_only,
+                split = 'train',
+                for_classifier=True,
+                pathologies=["No finding", "Bronchitis", "Brocho-pneumonia", "Bronchiolitis", "Pneumonia", "Other disease"]
+
+            )
+            ps.append(p)
+
+            p = VinDrPCXRParser(
+                root=self.vindrpcxr_root,
+                target_root=os.path.join(self.target_root, 'vindr-pcxr'),
+                transforms=self.transforms,
+                num_workers=self.num_workers,
+                frontal_only=self.frontal_only,
+                split = 'val',
+                for_classifier=True,
+                pathologies=["No finding", "Bronchitis", "Brocho-pneumonia", "Bronchiolitis", "Pneumonia", "Other disease"]
+            )
+            ps.append(p)
+            
+            p = VinDrPCXRParser(
+                root=self.vindrpcxr_root,
+                target_root=os.path.join(self.target_root, 'vindr-pcxr'),
+                transforms=self.transforms,
+                num_workers=self.num_workers,
+                frontal_only=self.frontal_only,
+                split = 'test',
+                for_classifier=True,
+                pathologies=["No finding", "Bronchitis", "Brocho-pneumonia", "Bronchiolitis", "Pneumonia", "Other disease"]
             )
             ps.append(p)
 
@@ -1042,7 +1155,7 @@ class MachexCompositor:
                 target_root=os.path.join(self.target_root, 'chexpert'),
                 transforms=self.transforms,
                 num_workers=self.num_workers,
-                frontal_only=self.frontal_only,
+                frontal_only=self.frontal_only
             )
             ps.append(p)
 
